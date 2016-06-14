@@ -1,0 +1,10 @@
+[
+    {
+        "COPP_TABLE:Group.ARP.trap": {
+        "trap_ids": "arp_req, arp_resp",
+        "trap_action":"trap",
+        "queue": "1"
+        },
+        "OP": "SET"
+    }
+]
