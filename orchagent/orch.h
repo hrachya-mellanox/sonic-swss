@@ -19,6 +19,8 @@ const char        ref_start             = '[';
 const char        ref_end               = ']';
 const std::string delimiter             = ":";
 const std::string list_item_delimiter   = ",";
+const std::string comma                 = ",";
+const std::string range_specifier       = "-";
 
 typedef std::map<string, sai_object_id_t> object_map;
 typedef std::pair<string, sai_object_id_t> object_map_pair;
@@ -81,6 +83,8 @@ protected:
         const string            &field_name,
         KeyOpFieldsValuesTuple  &tuple,
         sai_object_id_t         &sai_object);
+    bool parseIndexRange(const string &input, sai_uint32_t &range_low, sai_uint32_t &range_high);
+    bool parseNameArray(const string &input, vector<string> &port_names);
     bool parseReference(type_map &type_maps, string &ref, string &table_name, string &object_name);
     bool tokenizeString(string str, const string &separator, vector<string> &tokens);
     ref_resolve_status resolveFieldRefArray(

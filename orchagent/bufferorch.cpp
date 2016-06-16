@@ -287,49 +287,6 @@ task_process_status BufferOrch::processBufferProfile(Consumer &consumer)
     return task_process_status::task_success;
 }
 
-bool BufferOrch::parseIndexRange(const string &input, sai_uint32_t &range_low, sai_uint32_t &range_high)
-{
-    SWSS_LOG_ENTER();
-    SWSS_LOG_DEBUG("input:%s", input.c_str());
-    if (input.find(range_specifier) != string::npos)
-    {
-        vector<string> range_values;
-        if (!tokenizeString(input, range_specifier, range_values))
-        {
-            SWSS_LOG_ERROR("Failed to parse index in:%s\n", input.c_str());
-            return false;
-        }
-        if (range_values.size() != 2)
-        {
-            SWSS_LOG_ERROR("malformed index range in:%s. Must contain 2 tokens\n", input.c_str());
-            return false;
-        }
-        range_low = std::stoul(range_values[0]);
-        range_high = std::stoul(range_values[1]);
-        if (range_low >= range_high)
-        {
-            SWSS_LOG_ERROR("malformed index range in:%s. left value must be less than righ value.\n", input.c_str());
-            return false;
-        }
-    }
-    else
-    {
-        range_low = range_high = std::stoul(input);
-    }
-    SWSS_LOG_DEBUG("resulting range:%d-%d", range_low, range_high);
-    return true;
-}
-
-bool BufferOrch::parseNameArray(const string &input, vector<string> &port_names)
-{
-    if (input.find(comma) == string::npos)
-    {
-        port_names.push_back(input);
-        return true;
-    }
-    return tokenizeString(input, list_item_delimiter, port_names);
-}
-
 /*
 Input sample "BUFFER_QUEUE_TABLE:Ethernet4,Ethernet45:10-15"
 */

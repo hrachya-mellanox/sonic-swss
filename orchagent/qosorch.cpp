@@ -341,12 +341,31 @@ bool WredMapHandler::modifyQosMap(sai_object_id_t sai_object, std::vector<sai_at
     return true;
 }
 
-sai_object_id_t WredMapHandler::addQosMap(std::vector<sai_attribute_t> &attribs)
+sai_object_id_t WredMapHandler::addQosMap(std::vector<sai_attribute_t> &attribs_in)
 {
     SWSS_LOG_ENTER();
     sai_status_t sai_status;
     sai_object_id_t sai_object;
-    sai_status = sai_wred_api->create_wred_profile(&sai_object, attribs.size(), attribs.data());
+    sai_attribute_t attr;
+    std::vector<sai_attribute_t> attrs;
+
+    attr.id = SAI_WRED_ATTR_GREEN_DROP_PROBABILITY;
+    attr.value.s32 = 100;
+    attrs.push_back(attr);
+    
+    attr.id = SAI_WRED_ATTR_YELLOW_DROP_PROBABILITY;
+    attr.value.s32 = 100;
+    attrs.push_back(attr);
+    
+    attr.id = SAI_WRED_ATTR_ECN_MARK_ENABLE;
+    attr.value.booldata = true;
+    attrs.push_back(attr);
+
+    for(auto attrib : attribs_in)
+    {
+        attrs.push_back(attrib);
+    }
+    sai_status = sai_wred_api->create_wred_profile(&sai_object, attrs.size(), attrs.data());
     if (sai_status != SAI_STATUS_SUCCESS)
     {
         SWSS_LOG_ERROR( "Failed to create wred profile: %d", sai_status);
@@ -638,15 +657,20 @@ task_process_status QosOrch::handleQueueTable(Consumer& consumer)
     auto it = consumer.m_toSync.begin();
     KeyOpFieldsValuesTuple tuple = it->second;
     Port port;
-    bool result = true;
+    bool result;
     string key = kfvKey(tuple);
     string op = kfvOp(tuple);
     size_t queue_ind = 0;
     vector<string> tokens;
+    
+    sai_uint32_t range_low, range_high;
+    vector<string> port_names;
+
     ref_resolve_status  resolve_result;
     // sample "QUEUE_TABLE:ETHERNET4:1"
     if (!tokenizeString(key, delimiter, tokens))
     {
+        SWSS_LOG_ERROR("Failed to tokenize string:%s\n", key.c_str());
         return task_process_status::task_invalid_entry;
     }
     if (tokens.size() != 2)
@@ -659,82 +683,104 @@ task_process_status QosOrch::handleQueueTable(Consumer& consumer)
         SWSS_LOG_ERROR("Key with invalid table type passed in %s, expected:%s\n", key.c_str(), APP_QUEUE_TABLE_NAME);
         return task_process_status::task_invalid_entry;
     }
-    queue_ind = std::stoi(tokens[1]);
-    if (!m_portsOrch->getPort(tokens[0], port))
+    if (!parseNameArray(tokens[0], port_names))
     {
-        SWSS_LOG_ERROR("Port with alias:%s not found\n", tokens[0].c_str());
+        SWSS_LOG_ERROR("Failed to obtain port names");
         return task_process_status::task_invalid_entry;
     }
-
-    sai_object_id_t sai_scheduler_profile;
-    resolve_result = resolveFieldRefValue(m_qos_type_maps, scheduler_field_name, tuple, sai_scheduler_profile);
-    if (ref_resolve_status::success == resolve_result)
+    if (!parseIndexRange(tokens[1], range_low, range_high))
     {
-        if (op == SET_COMMAND)
+        SWSS_LOG_ERROR("Failed to parse range:%s", tokens[1].c_str());
+        return task_process_status::task_invalid_entry;
+    }
+    for (string port_name : port_names)
+    {
+        Port port;
+        SWSS_LOG_DEBUG("processing port:%s", port_name.c_str());
+        if (!m_portsOrch->getPort(port_name, port))
         {
-            result = applySchedulerToQueueSchedulerGroup(port, queue_ind, sai_scheduler_profile);
-        }
-        else if (op == DEL_COMMAND)
-        {
-            // NOTE: The map is un-bound from the port. But the map itself still exists.
-            result = applySchedulerToQueueSchedulerGroup(port, queue_ind, SAI_NULL_OBJECT_ID);
-        }
-        else
-        {
-            SWSS_LOG_ERROR("Unknown operation type %s\n", op.c_str());
+            SWSS_LOG_ERROR("Port with alias:%s not found\n", port_name.c_str());
             return task_process_status::task_invalid_entry;
         }
-        if (!result)
+        SWSS_LOG_DEBUG("processing range:%d-%d", range_low, range_high);
+        for (size_t ind = range_low; ind <= range_high; ind++)
         {
-            SWSS_LOG_ERROR("Failed setting field:%s to port:%s, queue:%d, line:%d\n", scheduler_field_name.c_str(), port.m_alias.c_str(), queue_ind, __LINE__);
-            return task_process_status::task_failed;
-        }        
-    }
-    else if (resolve_result != ref_resolve_status::field_not_found) 
-    {
-        if(ref_resolve_status::not_resolved == resolve_result)
-        {
-            SWSS_LOG_ERROR("Missing or invalid scheduler reference\n");
-            return task_process_status::task_need_retry;
-        }
-        SWSS_LOG_ERROR("Resolving scheduler reference failed\n");
-        return task_process_status::task_failed;
-    }
+            queue_ind = ind;
+            SWSS_LOG_DEBUG("processing queue:%d", queue_ind);
+            sai_object_id_t sai_scheduler_profile;
+            resolve_result = resolveFieldRefValue(m_qos_type_maps, scheduler_field_name, tuple, sai_scheduler_profile);
+            if (ref_resolve_status::success == resolve_result)
+            {
+                if (op == SET_COMMAND)
+                {
+                    result = applySchedulerToQueueSchedulerGroup(port, queue_ind, sai_scheduler_profile);
+                }
+                else if (op == DEL_COMMAND)
+                {
+                    // NOTE: The map is un-bound from the port. But the map itself still exists.
+                    result = applySchedulerToQueueSchedulerGroup(port, queue_ind, SAI_NULL_OBJECT_ID);
+                }
+                else
+                {
+                    SWSS_LOG_ERROR("Unknown operation type %s\n", op.c_str());
+                    return task_process_status::task_invalid_entry;
+                }
+                if (!result)
+                {
+                    SWSS_LOG_ERROR("Failed setting field:%s to port:%s, queue:%d, line:%d\n", scheduler_field_name.c_str(), port.m_alias.c_str(), queue_ind, __LINE__);
+                    return task_process_status::task_failed;
+                }
+                SWSS_LOG_DEBUG("Applied scheduler to port:%s", port_name.c_str());
+            }
+            else if (resolve_result != ref_resolve_status::field_not_found) 
+            {
+                if(ref_resolve_status::not_resolved == resolve_result)
+                {
+                    SWSS_LOG_ERROR("Missing or invalid scheduler reference\n");
+                    return task_process_status::task_need_retry;
+                }
+                SWSS_LOG_ERROR("Resolving scheduler reference failed\n");
+                return task_process_status::task_failed;
+            }
 
-    sai_object_id_t sai_wred_profile;
-    resolve_result = resolveFieldRefValue(m_qos_type_maps, wred_profile_field_name, tuple, sai_wred_profile);
-    if (ref_resolve_status::success == resolve_result)
-    {
-        if (op == SET_COMMAND)
-        {
-            result = applyWredProfileToQueue(port, queue_ind, sai_wred_profile);
+            sai_object_id_t sai_wred_profile;
+            resolve_result = resolveFieldRefValue(m_qos_type_maps, wred_profile_field_name, tuple, sai_wred_profile);
+            if (ref_resolve_status::success == resolve_result)
+            {
+                if (op == SET_COMMAND)
+                {
+                    result = applyWredProfileToQueue(port, queue_ind, sai_wred_profile);
+                }
+                else if (op == DEL_COMMAND)
+                {
+                    // NOTE: The map is un-bound from the port. But the map itself still exists.
+                    result = applyWredProfileToQueue(port, queue_ind, SAI_NULL_OBJECT_ID);
+                }
+                else
+                {
+                    SWSS_LOG_ERROR("Unknown operation type %s\n", op.c_str());
+                    return task_process_status::task_invalid_entry;
+                }
+                if (!result)
+                {
+                    SWSS_LOG_ERROR("Failed setting field:%s to port:%s, queue:%d, line:%d\n", wred_profile_field_name.c_str(), port.m_alias.c_str(), queue_ind, __LINE__);
+                    return task_process_status::task_failed;
+                }
+                SWSS_LOG_DEBUG("Applied wred profile to port:%s", port_name.c_str());
+            }
+            else if (resolve_result != ref_resolve_status::field_not_found) 
+            {
+                if(ref_resolve_status::not_resolved == resolve_result)
+                {
+                    SWSS_LOG_ERROR("Missing or invalid wred reference\n");
+                    return task_process_status::task_need_retry;
+                }
+                SWSS_LOG_ERROR("Resolving wred reference failed\n");
+                return task_process_status::task_failed;
+            }
         }
-        else if (op == DEL_COMMAND)
-        {
-            // NOTE: The map is un-bound from the port. But the map itself still exists.
-            result = applyWredProfileToQueue(port, queue_ind, SAI_NULL_OBJECT_ID);
-        }
-        else
-        {
-            SWSS_LOG_ERROR("Unknown operation type %s\n", op.c_str());
-            return task_process_status::task_invalid_entry;
-        }
-        if (!result)
-        {
-            SWSS_LOG_ERROR("Failed setting field:%s to port:%s, queue:%d, line:%d\n", wred_profile_field_name.c_str(), port.m_alias.c_str(), queue_ind, __LINE__);
-            return task_process_status::task_failed;
-        }        
     }
-    else if (resolve_result != ref_resolve_status::field_not_found) 
-    {
-        if(ref_resolve_status::not_resolved == resolve_result)
-        {
-            SWSS_LOG_ERROR("Missing or invalid wred reference\n");
-            return task_process_status::task_need_retry;
-        }
-        SWSS_LOG_ERROR("Resolving wred reference failed\n");
-        return task_process_status::task_failed;
-    }
+    SWSS_LOG_DEBUG("finished");
     return task_process_status::task_success;
 }
 
@@ -763,89 +809,101 @@ task_process_status QosOrch::handlePortQosMapTable(Consumer& consumer)
     string op = kfvOp(tuple);
     bool result = true;
     sai_object_id_t sai_object;
-    sai_port_attr_t port_attr;    
+    sai_port_attr_t port_attr;
+    vector<string> port_names;
     //"PORT_QOS_MAP_TABLE:ETHERNET4
     if (consumer.m_consumer->getTableName() != APP_PORT_QOS_MAP_TABLE_NAME)
     {
         SWSS_LOG_ERROR("Key with invalid table type passed in %s, expected:%s\n", key.c_str(), APP_PORT_QOS_MAP_TABLE_NAME);
         return task_process_status::task_invalid_entry;
     }
-    if (!m_portsOrch->getPort(key, port))
+    if (!parseNameArray(key, port_names))
     {
-        SWSS_LOG_ERROR("Port with alias:%s not found. key:%s\n", key.c_str(), key.c_str());
+        SWSS_LOG_ERROR("Failed to obtain port names");
         return task_process_status::task_invalid_entry;
     }
 
-    port_attr = SAI_PORT_ATTR_QOS_DSCP_TO_TC_MAP;
-    ref_resolve_status resolve_result = resolveFieldRefValue(m_qos_type_maps, dscp_to_tc_field_name, tuple, sai_object);
-    if (ref_resolve_status::success == resolve_result)
+    for (string port_name : port_names)
     {
-        if (op == SET_COMMAND)
+        Port port;
+        SWSS_LOG_DEBUG("processing port:%s", port_name.c_str());
+        if (!m_portsOrch->getPort(port_name, port))
         {
-            result = applyMapToPort(port, port_attr, sai_object);
-        }
-        else if (op == DEL_COMMAND)
-        {
-            // NOTE: The map is un-bound from the port. But the map itself still exists.
-            result = applyMapToPort(port, port_attr, SAI_NULL_OBJECT_ID);
-        }
-        else
-        {
-            SWSS_LOG_ERROR("Unknown operation type %s\n", op.c_str());
+            SWSS_LOG_ERROR("Port with alias:%s not found\n", port_name.c_str());
             return task_process_status::task_invalid_entry;
         }
-        if (!result)
+    
+        port_attr = SAI_PORT_ATTR_QOS_DSCP_TO_TC_MAP;
+        ref_resolve_status resolve_result = resolveFieldRefValue(m_qos_type_maps, dscp_to_tc_field_name, tuple, sai_object);
+        if (ref_resolve_status::success == resolve_result)
         {
-            SWSS_LOG_ERROR("Failed setting field:%s to port:%s, line:%d\n", dscp_to_tc_field_name.c_str(), port.m_alias.c_str(), __LINE__);
+            if (op == SET_COMMAND)
+            {
+                result = applyMapToPort(port, port_attr, sai_object);
+            }
+            else if (op == DEL_COMMAND)
+            {
+                // NOTE: The map is un-bound from the port. But the map itself still exists.
+                result = applyMapToPort(port, port_attr, SAI_NULL_OBJECT_ID);
+            }
+            else
+            {
+                SWSS_LOG_ERROR("Unknown operation type %s\n", op.c_str());
+                return task_process_status::task_invalid_entry;
+            }
+            if (!result)
+            {
+                SWSS_LOG_ERROR("Failed setting field:%s to port:%s, line:%d\n", dscp_to_tc_field_name.c_str(), port.m_alias.c_str(), __LINE__);
+                return task_process_status::task_failed;
+            }
+            SWSS_LOG_DEBUG("Applied field:%s to port:%s, line:%d\n", dscp_to_tc_field_name.c_str(), port.m_alias.c_str(), __LINE__);        
+        }
+        else if (resolve_result != ref_resolve_status::field_not_found) 
+        {
+            if(ref_resolve_status::not_resolved == resolve_result)
+            {
+                SWSS_LOG_ERROR("Missing or invalid dscp_to_tc reference\n");
+                return task_process_status::task_need_retry;
+            }
+            SWSS_LOG_ERROR("Resolving dscp_to_tc reference failed\n");
             return task_process_status::task_failed;
         }
-        SWSS_LOG_DEBUG("Applied field:%s to port:%s, line:%d\n", dscp_to_tc_field_name.c_str(), port.m_alias.c_str(), __LINE__);        
-    }
-    else if (resolve_result != ref_resolve_status::field_not_found) 
-    {
-        if(ref_resolve_status::not_resolved == resolve_result)
-        {
-            SWSS_LOG_ERROR("Missing or invalid dscp_to_tc reference\n");
-            return task_process_status::task_need_retry;
-        }
-        SWSS_LOG_ERROR("Resolving dscp_to_tc reference failed\n");
-        return task_process_status::task_failed;
-    }
 
-    port_attr = SAI_PORT_ATTR_QOS_TC_TO_QUEUE_MAP;
-    resolve_result = resolveFieldRefValue(m_qos_type_maps, tc_to_queue_field_name, tuple, sai_object);
-    if (ref_resolve_status::success == resolve_result)
-    {
-        if (op == SET_COMMAND)
+        port_attr = SAI_PORT_ATTR_QOS_TC_TO_QUEUE_MAP;
+        resolve_result = resolveFieldRefValue(m_qos_type_maps, tc_to_queue_field_name, tuple, sai_object);
+        if (ref_resolve_status::success == resolve_result)
         {
-            result = applyMapToPort(port, port_attr, sai_object);
+            if (op == SET_COMMAND)
+            {
+                result = applyMapToPort(port, port_attr, sai_object);
+            }
+            else if (op == DEL_COMMAND)
+            {
+                // NOTE: The map is un-bound from the port. But the map itself still exists.
+                result = applyMapToPort(port, port_attr, SAI_NULL_OBJECT_ID);
+            }
+            else
+            {
+                SWSS_LOG_ERROR("Unknown operation type %s\n", op.c_str());
+                return task_process_status::task_invalid_entry;
+            }
+            if (!result)
+            {
+                SWSS_LOG_ERROR("Failed setting field:%s to port:%s, line:%d\n", tc_to_queue_field_name.c_str(), port.m_alias.c_str(), __LINE__);
+                return task_process_status::task_failed;
+            }
+            SWSS_LOG_DEBUG("Applied field:%s to port:%s, line:%d\n", tc_to_queue_field_name.c_str(), port.m_alias.c_str(), __LINE__);
         }
-        else if (op == DEL_COMMAND)
+        else if (resolve_result != ref_resolve_status::field_not_found) 
         {
-            // NOTE: The map is un-bound from the port. But the map itself still exists.
-            result = applyMapToPort(port, port_attr, SAI_NULL_OBJECT_ID);
-        }
-        else
-        {
-            SWSS_LOG_ERROR("Unknown operation type %s\n", op.c_str());
-            return task_process_status::task_invalid_entry;
-        }
-        if (!result)
-        {
-            SWSS_LOG_ERROR("Failed setting field:%s to port:%s, line:%d\n", tc_to_queue_field_name.c_str(), port.m_alias.c_str(), __LINE__);
+            if(ref_resolve_status::not_resolved == resolve_result)
+            {
+                SWSS_LOG_ERROR("Missing or invalid tc_to_queue reference\n");
+                return task_process_status::task_need_retry;
+            }
+            SWSS_LOG_ERROR("Resolving tc_to_queue reference failed\n");
             return task_process_status::task_failed;
         }
-        SWSS_LOG_DEBUG("Applied field:%s to port:%s, line:%d\n", tc_to_queue_field_name.c_str(), port.m_alias.c_str(), __LINE__);
-    }
-    else if (resolve_result != ref_resolve_status::field_not_found) 
-    {
-        if(ref_resolve_status::not_resolved == resolve_result)
-        {
-            SWSS_LOG_ERROR("Missing or invalid tc_to_queue reference\n");
-            return task_process_status::task_need_retry;
-        }
-        SWSS_LOG_ERROR("Resolving tc_to_queue reference failed\n");
-        return task_process_status::task_failed;
     }
     return task_process_status::task_success;
 }
@@ -885,7 +943,9 @@ void QosOrch::doTask(Consumer &consumer)
         switch(task_status)
         {
             case task_process_status::task_success :
-                it = consumer.m_toSync.erase(it);
+                dumpTuple(consumer, tuple);
+                it = consumer.m_toSync.erase(it);                
+                SWSS_LOG_DEBUG("Successfully processed item, removing from queue.");
                 break;
             case task_process_status::task_invalid_entry :
                 SWSS_LOG_ERROR("Invalid QOS task item was encountered, removing from queue.");
@@ -900,6 +960,10 @@ void QosOrch::doTask(Consumer &consumer)
                 SWSS_LOG_ERROR("Processing QOS task item failed, will retry.");
                 dumpTuple(consumer, tuple);
                 it++;
+                break;
+            default:
+                SWSS_LOG_ERROR("Invdalid resolve result.");
+                break;
         }
     }
 }

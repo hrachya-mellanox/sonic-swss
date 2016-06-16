@@ -62,7 +62,7 @@ bool OrchDaemon::init()
     BufferOrch *buffer_orch = new BufferOrch(m_applDb, buffer_tables, ports_orch);
 
     m_select = new Select();
-    m_orch_list = { ports_orch, intfs_orch, neigh_orch, route_orch, qos_orch, buffer_orch };
+    m_orchList = { ports_orch, intfs_orch, neigh_orch, route_orch, qos_orch, buffer_orch };
 
     return true;
 }
@@ -95,8 +95,10 @@ void OrchDaemon::start()
              * execute all the remaining tasks that need to be retried. */
             for (Orch *o : m_orchList)
             {
+                SWSS_LOG_DEBUG("doTask from Select::TIMEOUT");
                 o->doTask();
             }
+            continue;
         }
 
         Orch *o = getOrchByConsumer((ConsumerTable *)s);

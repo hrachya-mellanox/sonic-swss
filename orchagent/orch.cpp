@@ -126,8 +126,9 @@ bool Orch::tokenizeString(string str, const string &separator, vector<string> &t
     }
     if(string::npos == str.find(separator))
     {
-        SWSS_LOG_ERROR("Specified separator:%s not found in input:%s\n", separator.c_str(), str.c_str());
-        return false;
+        SWSS_LOG_DEBUG("Single token:'%s'", str.c_str());
+        tokens.push_back(str);
+        return true;
     }
     istringstream ss(str);
     string tmp;
@@ -223,15 +224,9 @@ ref_resolve_status Orch::resolveFieldRefValue(
     return ref_resolve_status::success;
 }
 
-    if(!consumer.m_toSync.empty())
-        doTask(consumer);
-
-    return true;
-}
-
 void Orch::doTask()
 {
-    for(auto it : m_consumerMap)
+    for(auto& it : m_consumerMap)
     {
         if(!it.second.m_toSync.empty())
             doTask(it.second);
@@ -293,3 +288,49 @@ ref_resolve_status Orch::resolveFieldRefArray(
     }
     return ref_resolve_status::success;
 }
+
+bool Orch::parseNameArray(const string &input, vector<string> &port_names)
+{
+    SWSS_LOG_ENTER();
+    SWSS_LOG_DEBUG("input:%s", input.c_str());
+    if (input.find(comma) == string::npos)
+    {
+        port_names.push_back(input);
+        return true;
+    }
+    return tokenizeString(input, list_item_delimiter, port_names);
+}
+
+bool Orch::parseIndexRange(const string &input, sai_uint32_t &range_low, sai_uint32_t &range_high)
+{
+    SWSS_LOG_ENTER();
+    SWSS_LOG_DEBUG("input:%s", input.c_str());
+    if (input.find(range_specifier) != string::npos)
+    {
+        vector<string> range_values;
+        if (!tokenizeString(input, range_specifier, range_values))
+        {
+            SWSS_LOG_ERROR("Failed to parse index in:%s\n", input.c_str());
+            return false;
+        }
+        if (range_values.size() != 2)
+        {
+            SWSS_LOG_ERROR("malformed index range in:%s. Must contain 2 tokens\n", input.c_str());
+            return false;
+        }
+        range_low = std::stoul(range_values[0]);
+        range_high = std::stoul(range_values[1]);
+        if (range_low >= range_high)
+        {
+            SWSS_LOG_ERROR("malformed index range in:%s. left value must be less than righ value.\n", input.c_str());
+            return false;
+        }
+    }
+    else
+    {
+        range_low = range_high = std::stoul(input);
+    }
+    SWSS_LOG_DEBUG("resulting range:%d-%d", range_low, range_high);
+    return true;
+}
+

@@ -18,9 +18,7 @@ const std::string buffer_value_ingress           = "ingress";
 const std::string buffer_value_egress            = "egress";
 const std::string buffer_pool_mode_dynamic_value = "dynamic";
 const std::string buffer_pool_mode_static_value  = "static";
-const std::string range_specifier                = "-";
 const std::string buffer_profile_list_field_name = "profile_list";
-const std::string comma                          = ",";
 
 class BufferOrch : public Orch
 {
@@ -40,8 +38,6 @@ private:
     task_process_status processPriorityGroup(Consumer &consumer);
     task_process_status processIngressBufferProfileList(Consumer &consumer);
     task_process_status processEgressBufferProfileList(Consumer &consumer);
-    bool parseIndexRange(const string &input, sai_uint32_t &range_low, sai_uint32_t &range_high);
-    bool parseNameArray(const string &input, vector<string> &port_names);
 private:
     PortsOrch *m_portsOrch;
     buffer_table_handler_map m_bufferHandlerMap;
