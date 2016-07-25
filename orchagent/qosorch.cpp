@@ -281,6 +281,71 @@ bool WredMapHandler::isValidTable(string &tableName)
     }
     return true;
 }
+
+bool WredMapHandler::convertEcnMode(string str, sai_ecn_mark_mode_t &ecn_val)
+{
+    SWSS_LOG_ENTER();
+    SWSS_LOG_DEBUG("input:%s", str.c_str());
+    if(str == "ecn_none")
+    {
+        ecn_val = SAI_ECN_MARK_MODE_NONE;
+    }
+    else if(str == "ecn_green")
+    {
+        ecn_val = SAI_ECN_MARK_MODE_GREEN;
+    }
+    else if(str == "ecn_yellow")
+    {
+        ecn_val = SAI_ECN_MARK_MODE_YELLOW;
+    }
+    else if(str == "ecn_red")
+    {
+        ecn_val = SAI_ECN_MARK_MODE_RED;
+    }
+    else if(str == "ecn_green_yellow")
+    {
+        ecn_val = SAI_ECN_MARK_MODE_GREEN_YELLOW;
+    }
+    else if(str == "ecn_green_red")
+    {
+        ecn_val = SAI_ECN_MARK_MODE_GREEN_RED;
+    }
+    else if(str == "ecn_yellow_red")
+    {
+        ecn_val = SAI_ECN_MARK_MODE_YELLOW_RED;
+    }
+    else if(str == "ecn_all")
+    {
+        ecn_val = SAI_ECN_MARK_MODE_ALL;
+    }
+    else
+    {
+        SWSS_LOG_ERROR("Invalid ECN mode specified");
+        return false;
+    }
+    return true;
+}
+
+bool WredMapHandler::convertBool(string str, bool &val)
+{
+    SWSS_LOG_ENTER();
+    SWSS_LOG_DEBUG("input:%s", str.c_str());
+    if("true" == str)
+    {
+        val = true;
+    }
+    else if ("false" == str)
+    {
+        val = false;
+    }
+    else
+    {
+        SWSS_LOG_ERROR("Invalid input specified");
+        return false;        
+    }
+    return true;    
+}
+
 bool WredMapHandler::convertFieldValuesToAttributes(KeyOpFieldsValuesTuple &tuple, std::vector<sai_attribute_t> &attribs)
 {
     SWSS_LOG_ENTER();
@@ -289,10 +354,6 @@ bool WredMapHandler::convertFieldValuesToAttributes(KeyOpFieldsValuesTuple &tupl
     {
         if (fvField(*i) == yellow_max_threshold_field_name)
         {
-            attr.id = SAI_WRED_ATTR_YELLOW_ENABLE;
-            attr.value.booldata = true;
-            attribs.push_back(attr);
-
             attr.id = SAI_WRED_ATTR_YELLOW_MAX_THRESHOLD;
             attr.value.s32 = std::stoi(fvValue(*i));
             attribs.push_back(attr);
@@ -304,10 +365,6 @@ bool WredMapHandler::convertFieldValuesToAttributes(KeyOpFieldsValuesTuple &tupl
         }
         else if (fvField(*i) == green_max_threshold_field_name)
         {
-            attr.id = SAI_WRED_ATTR_GREEN_ENABLE;
-            attr.value.booldata = true;
-            attribs.push_back(attr);
-
             attr.id = SAI_WRED_ATTR_GREEN_MAX_THRESHOLD;
             attr.value.s32 = std::stoi(fvValue(*i));
             attribs.push_back(attr);
@@ -315,6 +372,55 @@ bool WredMapHandler::convertFieldValuesToAttributes(KeyOpFieldsValuesTuple &tupl
             // set min threshold to the same value as MAX
             attr.id = SAI_WRED_ATTR_GREEN_MIN_THRESHOLD;
             attr.value.s32 = std::stoi(fvValue(*i));
+            attribs.push_back(attr);
+        }
+        else if (fvField(*i) == red_max_threshold_field_name)
+        {
+            attr.id = SAI_WRED_ATTR_RED_MAX_THRESHOLD;
+            attr.value.s32 = std::stoi(fvValue(*i));
+            attribs.push_back(attr);
+
+            // set min threshold to the same value as MAX
+            attr.id = SAI_WRED_ATTR_RED_MIN_THRESHOLD;
+            attr.value.s32 = std::stoi(fvValue(*i));
+            attribs.push_back(attr);
+        }
+        else if (fvField(*i) == wred_green_enable_field_name)
+        {
+            attr.id = SAI_WRED_ATTR_GREEN_ENABLE;
+            if(!convertBool(fvValue(*i),attr.value.booldata))
+            {
+                return false;
+            }
+            attribs.push_back(attr);
+        }
+        else if (fvField(*i) == wred_yellow_enable_field_name)
+        {
+            attr.id = SAI_WRED_ATTR_YELLOW_ENABLE;
+            if(!convertBool(fvValue(*i),attr.value.booldata))
+            {
+                return false;
+            }
+            attribs.push_back(attr);
+        }
+        else if (fvField(*i) == wred_red_enable_field_name)
+        {
+            attr.id = SAI_WRED_ATTR_RED_ENABLE;
+            if(!convertBool(fvValue(*i),attr.value.booldata))
+            {
+                return false;
+            }
+            attribs.push_back(attr);
+        }
+        else if (fvField(*i) == ecn_field_name)
+        {
+            attr.id = SAI_WRED_ATTR_ECN_MARK_MODE;
+            sai_ecn_mark_mode_t ecn;
+            if(!convertEcnMode(fvValue(*i), ecn))
+            {
+                return false;
+            }
+            attr.value.s32 = ecn;
             attribs.push_back(attr);
         }
         else {
@@ -357,8 +463,8 @@ sai_object_id_t WredMapHandler::addQosMap(std::vector<sai_attribute_t> &attribs_
     attr.value.s32 = 100;
     attrs.push_back(attr);
 
-    attr.id = SAI_WRED_ATTR_ECN_MARK_ENABLE;
-    attr.value.booldata = true;
+    attr.id = SAI_WRED_ATTR_WEIGHT;
+    attr.value.s32 = 0;
     attrs.push_back(attr);
 
     for(auto attrib : attribs_in)

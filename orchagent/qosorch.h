@@ -11,6 +11,10 @@ const std::string scheduler_field_name              = "scheduler";
 const std::string wred_profile_field_name           = "wred_profile";
 const std::string yellow_max_threshold_field_name   = "yellow_max_threshold";
 const std::string green_max_threshold_field_name    = "green_max_threshold";
+const std::string red_max_threshold_field_name      = "red_max_threshold";
+const std::string wred_green_enable_field_name      = "wred_green_enable";
+const std::string wred_yellow_enable_field_name     = "wred_yellow_enable";
+const std::string wred_red_enable_field_name        = "wred_red_enable";
 
 const std::string scheduler_algo_type_field_name    = "type";
 const std::string scheduler_algo_DWRR               = "DWRR";
@@ -18,6 +22,16 @@ const std::string scheduler_algo_WRR                = "WRR";
 const std::string scheduler_algo_STRICT             = "STRICT";
 const std::string scheduler_weight_field_name       = "weight";
 const std::string scheduler_priority_field_name     = "priority";
+
+const std::string ecn_field_name                    = "ecn";
+const std::string ecn_none                          = "ecn_none";
+const std::string ecn_green                         = "ecn_green";
+const std::string ecn_yellow                        = "ecn_yellow";
+const std::string ecn_red                           = "ecn_red";
+const std::string ecn_green_yellow                  = "ecn_green_yellow";
+const std::string ecn_green_red                     = "ecn_green_red";
+const std::string ecn_yellow_red                    = "ecn_yellow_red";
+const std::string ecn_all                           = "ecn_all";
 
 class QosMapHandler
 {
@@ -62,6 +76,9 @@ public:
     bool modifyQosMap(sai_object_id_t, std::vector<sai_attribute_t> &attributes);
     sai_object_id_t addQosMap(std::vector<sai_attribute_t> &attributes);
     bool removeQosMap(sai_object_id_t sai_object);
+protected:    
+    bool convertEcnMode(string str, sai_ecn_mark_mode_t &ecn_val);
+    bool convertBool(string str, bool &val);
 };
 
 class QosOrch : public Orch
