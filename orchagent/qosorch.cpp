@@ -20,7 +20,10 @@ type_map QosOrch::m_qos_type_maps = {
     {APP_SCHEDULER_TABLE_NAME,       new object_map()},
     {APP_WRED_PROFILE_TABLE_NAME,    new object_map()},
     {APP_PORT_QOS_MAP_TABLE_NAME,    new object_map()},
-    {APP_QUEUE_TABLE_NAME,           new object_map()}
+    {APP_QUEUE_TABLE_NAME,           new object_map()},
+    {APP_TC_TO_PRIORITY_GROUP_MAP_NAME,           new object_map()},
+    {APP_PFC_PRIORITY_TO_PRIORITY_GROUP_MAP_NAME, new object_map()},
+    {APP_PFC_PRIORITY_TO_QUEUE_MAP_NAME,          new object_map()}
 };
 
 task_process_status QosMapHandler::processWorkItem(Consumer& consumer)
@@ -253,7 +256,7 @@ bool TcToQueueMapHandler::removeQosMap(sai_object_id_t sai_object)
     sai_status_t sai_status = sai_qos_map_api->remove_qos_map(sai_object);
     if (SAI_STATUS_SUCCESS != sai_status)
     {
-        SWSS_LOG_ERROR("Failed to remove tc_to_queue mapstatus%d", sai_status);
+        SWSS_LOG_ERROR("Failed to remove tc_to_queue map status:%d", sai_status);
         return false;
     }
     return true;
@@ -479,6 +482,7 @@ sai_object_id_t WredMapHandler::addQosMap(std::vector<sai_attribute_t> &attribs_
     }
     return sai_object;
 }
+
 bool WredMapHandler::removeQosMap(sai_object_id_t sai_object)
 {
     SWSS_LOG_ENTER();
@@ -497,6 +501,272 @@ task_process_status QosOrch::handleWredProfileTable(Consumer& consumer)
     SWSS_LOG_ENTER();
     WredMapHandler wred_handler;
     return wred_handler.processWorkItem(consumer);
+}
+
+bool TcToPgHandler::isValidTable(string &tableName)
+{
+    SWSS_LOG_ENTER();
+    if (tableName != APP_TC_TO_PRIORITY_GROUP_MAP_NAME)
+    {
+        SWSS_LOG_ERROR("invalid table type passed in %s, expected:%s\n", tableName.c_str(), APP_TC_TO_PRIORITY_GROUP_MAP_NAME);
+        return false;
+    }
+    return true;
+}
+
+bool TcToPgHandler::convertFieldValuesToAttributes(KeyOpFieldsValuesTuple &tuple, std::vector<sai_attribute_t> &attributes)
+{
+    SWSS_LOG_ENTER();
+    sai_attribute_t     list_attr;
+    sai_qos_map_list_t  tc_to_pg_map_list;
+    tc_to_pg_map_list.count = kfvFieldsValues(tuple).size();
+    tc_to_pg_map_list.list = new sai_qos_map_t[tc_to_pg_map_list.count];
+    uint32_t ind = 0;
+    for (auto i = kfvFieldsValues(tuple).begin(); i != kfvFieldsValues(tuple).end(); i++, ind++)
+    {
+        tc_to_pg_map_list.list[ind].key.tc = std::stoi(fvField(*i));
+        tc_to_pg_map_list.list[ind].value.pg = std::stoi(fvValue(*i));
+    }
+    list_attr.id = SAI_QOS_MAP_ATTR_MAP_TO_VALUE_LIST;
+    list_attr.value.qosmap.count = tc_to_pg_map_list.count;
+    list_attr.value.qosmap.list = tc_to_pg_map_list.list;
+    attributes.push_back(list_attr);
+    return true;
+}
+
+void TcToPgHandler::freeAttribResources(std::vector<sai_attribute_t> &attributes)
+{
+    SWSS_LOG_ENTER();
+    delete[] attributes[0].value.qosmap.list;
+}
+
+bool TcToPgHandler::modifyQosMap(sai_object_id_t sai_object, std::vector<sai_attribute_t> &attributes)
+{
+    SWSS_LOG_ENTER();
+    sai_status_t sai_status = sai_qos_map_api->set_qos_map_attribute(sai_object, &attributes[0]);
+    if (SAI_STATUS_SUCCESS != sai_status)
+    {
+        SWSS_LOG_ERROR("Failed to moify tc_to_queue map. status:%d", sai_status);
+        return false;
+    }
+    return true;
+}
+
+sai_object_id_t TcToPgHandler::addQosMap(std::vector<sai_attribute_t> &attributes)
+{
+    SWSS_LOG_ENTER();
+    sai_status_t sai_status;
+    sai_object_id_t sai_object;
+    sai_attribute_t qos_map_attrs[2];
+    qos_map_attrs[0].id = SAI_QOS_MAP_ATTR_TYPE;
+    qos_map_attrs[0].value.s32 = SAI_QOS_MAP_TC_TO_PRIORITY_GROUP;
+    qos_map_attrs[1].id = SAI_QOS_MAP_ATTR_MAP_TO_VALUE_LIST;
+    qos_map_attrs[1].value.qosmap.count = attributes[0].value.qosmap.count;
+    qos_map_attrs[1].value.qosmap.list = attributes[0].value.qosmap.list;
+    sai_status = sai_qos_map_api->create_qos_map(&sai_object, 2, qos_map_attrs);
+    if (SAI_STATUS_SUCCESS != sai_status)
+    {
+        SWSS_LOG_ERROR("Failed to create tc_to_queue map. status:%d", sai_status);
+        return SAI_NULL_OBJECT_ID;
+    }
+    return sai_object;
+
+}
+
+bool TcToPgHandler::removeQosMap(sai_object_id_t sai_object)
+{
+    SWSS_LOG_ENTER();
+    sai_status_t sai_status = sai_qos_map_api->remove_qos_map(sai_object);
+    if (SAI_STATUS_SUCCESS != sai_status)
+    {
+        SWSS_LOG_ERROR("Failed to remove tc_to_pg map status:%d", sai_status);
+        return false;
+    }
+    return true;
+}
+
+task_process_status QosOrch::handleTcToPgTable(Consumer& consumer)
+{
+    SWSS_LOG_ENTER();
+    TcToPgHandler tc_to_pg_handler;
+    return tc_to_pg_handler.processWorkItem(consumer);
+}
+
+bool PfcPrioToPgHandler::isValidTable(string &tableName)
+{
+    SWSS_LOG_ENTER();
+    if (tableName != APP_PFC_PRIORITY_TO_PRIORITY_GROUP_MAP_NAME)
+    {
+        SWSS_LOG_ERROR("invalid table type passed in %s, expected:%s\n", tableName.c_str(), APP_PFC_PRIORITY_TO_PRIORITY_GROUP_MAP_NAME);
+        return false;
+    }
+    return true;
+}
+
+bool PfcPrioToPgHandler::convertFieldValuesToAttributes(KeyOpFieldsValuesTuple &tuple, std::vector<sai_attribute_t> &attributes)
+{
+    SWSS_LOG_ENTER();
+    sai_attribute_t     list_attr;
+    sai_qos_map_list_t  pfc_prio_to_pg_map_list;
+    pfc_prio_to_pg_map_list.count = kfvFieldsValues(tuple).size();
+    pfc_prio_to_pg_map_list.list = new sai_qos_map_t[pfc_prio_to_pg_map_list.count];
+    uint32_t ind = 0;
+    for (auto i = kfvFieldsValues(tuple).begin(); i != kfvFieldsValues(tuple).end(); i++, ind++)
+    {
+        pfc_prio_to_pg_map_list.list[ind].key.prio = std::stoi(fvField(*i));
+        pfc_prio_to_pg_map_list.list[ind].value.pg = std::stoi(fvValue(*i));
+    }
+    list_attr.id = SAI_QOS_MAP_ATTR_MAP_TO_VALUE_LIST;
+    list_attr.value.qosmap.count = pfc_prio_to_pg_map_list.count;
+    list_attr.value.qosmap.list = pfc_prio_to_pg_map_list.list;
+    attributes.push_back(list_attr);
+    return true;
+}
+
+void PfcPrioToPgHandler::freeAttribResources(std::vector<sai_attribute_t> &attributes)
+{
+    SWSS_LOG_ENTER();
+    delete[] attributes[0].value.qosmap.list;
+}
+
+bool PfcPrioToPgHandler::modifyQosMap(sai_object_id_t sai_object, std::vector<sai_attribute_t> &attributes)
+{
+    SWSS_LOG_ENTER();
+    sai_status_t sai_status = sai_qos_map_api->set_qos_map_attribute(sai_object, &attributes[0]);
+    if (SAI_STATUS_SUCCESS != sai_status)
+    {
+        SWSS_LOG_ERROR("Failed to moify tc_to_queue map. status:%d", sai_status);
+        return false;
+    }
+    return true;
+}
+
+sai_object_id_t PfcPrioToPgHandler::addQosMap(std::vector<sai_attribute_t> &attributes)
+{
+    SWSS_LOG_ENTER();
+    sai_status_t sai_status;
+    sai_object_id_t sai_object;
+    sai_attribute_t qos_map_attrs[2];
+    qos_map_attrs[0].id = SAI_QOS_MAP_ATTR_TYPE;
+    qos_map_attrs[0].value.s32 = SAI_QOS_MAP_PFC_PRIORITY_TO_PRIORITY_GROUP;
+    qos_map_attrs[1].id = SAI_QOS_MAP_ATTR_MAP_TO_VALUE_LIST;
+    qos_map_attrs[1].value.qosmap.count = attributes[0].value.qosmap.count;
+    qos_map_attrs[1].value.qosmap.list = attributes[0].value.qosmap.list;
+    sai_status = sai_qos_map_api->create_qos_map(&sai_object, 2, qos_map_attrs);
+    if (SAI_STATUS_SUCCESS != sai_status)
+    {
+        SWSS_LOG_ERROR("Failed to create tc_to_queue map. status:%d", sai_status);
+        return SAI_NULL_OBJECT_ID;
+    }
+    return sai_object;
+
+}
+
+bool PfcPrioToPgHandler::removeQosMap(sai_object_id_t sai_object)
+{
+    SWSS_LOG_ENTER();
+    sai_status_t sai_status = sai_qos_map_api->remove_qos_map(sai_object);
+    if (SAI_STATUS_SUCCESS != sai_status)
+    {
+        SWSS_LOG_ERROR("Failed to remove pfc_prio_to_pg map status:%d", sai_status);
+        return false;
+    }
+    return true;
+}
+
+task_process_status QosOrch::handlePfcPrioToPgTable(Consumer& consumer)
+{
+    SWSS_LOG_ENTER();
+    PfcPrioToPgHandler pfc_prio_to_pg_handler;
+    return pfc_prio_to_pg_handler.processWorkItem(consumer);
+}
+
+bool PfcToQueueHandler::isValidTable(string &tableName)
+{
+    SWSS_LOG_ENTER();
+    if (tableName != APP_PFC_PRIORITY_TO_QUEUE_MAP_NAME)
+    {
+        SWSS_LOG_ERROR("invalid table type passed in %s, expected:%s\n", tableName.c_str(), APP_PFC_PRIORITY_TO_QUEUE_MAP_NAME);
+        return false;
+    }
+    return true;
+}
+
+bool PfcToQueueHandler::convertFieldValuesToAttributes(KeyOpFieldsValuesTuple &tuple, std::vector<sai_attribute_t> &attributes)
+{
+    SWSS_LOG_ENTER();
+    sai_attribute_t     list_attr;
+    sai_qos_map_list_t  pfc_to_queue_map_list;
+    pfc_to_queue_map_list.count = kfvFieldsValues(tuple).size();
+    pfc_to_queue_map_list.list = new sai_qos_map_t[pfc_to_queue_map_list.count];
+    uint32_t ind = 0;
+    for (auto i = kfvFieldsValues(tuple).begin(); i != kfvFieldsValues(tuple).end(); i++, ind++)
+    {
+        pfc_to_queue_map_list.list[ind].key.prio = std::stoi(fvField(*i));
+        pfc_to_queue_map_list.list[ind].value.queue_index = std::stoi(fvValue(*i));
+    }
+    list_attr.id = SAI_QOS_MAP_ATTR_MAP_TO_VALUE_LIST;
+    list_attr.value.qosmap.count = pfc_to_queue_map_list.count;
+    list_attr.value.qosmap.list = pfc_to_queue_map_list.list;
+    attributes.push_back(list_attr);
+    return true;
+}
+
+void PfcToQueueHandler::freeAttribResources(std::vector<sai_attribute_t> &attributes)
+{
+    SWSS_LOG_ENTER();
+    delete[] attributes[0].value.qosmap.list;
+}
+
+bool PfcToQueueHandler::modifyQosMap(sai_object_id_t sai_object, std::vector<sai_attribute_t> &attributes)
+{
+    SWSS_LOG_ENTER();
+    sai_status_t sai_status = sai_qos_map_api->set_qos_map_attribute(sai_object, &attributes[0]);
+    if (SAI_STATUS_SUCCESS != sai_status)
+    {
+        SWSS_LOG_ERROR("Failed to moify tc_to_queue map. status:%d", sai_status);
+        return false;
+    }
+    return true;
+}
+sai_object_id_t PfcToQueueHandler::addQosMap(std::vector<sai_attribute_t> &attributes)
+{
+    SWSS_LOG_ENTER();
+    sai_status_t sai_status;
+    sai_object_id_t sai_object;
+    sai_attribute_t qos_map_attrs[2];
+    qos_map_attrs[0].id = SAI_QOS_MAP_ATTR_TYPE;
+    qos_map_attrs[0].value.s32 = SAI_QOS_MAP_PFC_PRIORITY_TO_QUEUE;
+    qos_map_attrs[1].id = SAI_QOS_MAP_ATTR_MAP_TO_VALUE_LIST;
+    qos_map_attrs[1].value.qosmap.count = attributes[0].value.qosmap.count;
+    qos_map_attrs[1].value.qosmap.list = attributes[0].value.qosmap.list;
+    sai_status = sai_qos_map_api->create_qos_map(&sai_object, 2, qos_map_attrs);
+    if (SAI_STATUS_SUCCESS != sai_status)
+    {
+        SWSS_LOG_ERROR("Failed to create tc_to_queue map. status:%d", sai_status);
+        return SAI_NULL_OBJECT_ID;
+    }
+    return sai_object;
+
+}
+
+bool PfcToQueueHandler::removeQosMap(sai_object_id_t sai_object)
+{
+    SWSS_LOG_ENTER();
+    sai_status_t sai_status = sai_qos_map_api->remove_qos_map(sai_object);
+    if (SAI_STATUS_SUCCESS != sai_status)
+    {
+        SWSS_LOG_ERROR("Failed to remove pfc_to_queue map status:%d", sai_status);
+        return false;
+    }
+    return true;
+}
+
+task_process_status QosOrch::handlePfcToQueueTable(Consumer& consumer)
+{
+    SWSS_LOG_ENTER();
+    PfcPrioToPgHandler pfc_prio_to_pg_handler;
+    return pfc_prio_to_pg_handler.processWorkItem(consumer);
 }
 
 QosOrch::QosOrch(DBConnector *db, vector<string> &tableNames, PortsOrch *portsOrch) :
@@ -521,6 +791,10 @@ void QosOrch::initTableHandlers()
     m_qos_handler_map.insert(qos_handler_pair(APP_QUEUE_TABLE_NAME, &QosOrch::handleQueueTable));
     m_qos_handler_map.insert(qos_handler_pair(APP_PORT_QOS_MAP_TABLE_NAME, &QosOrch::handlePortQosMapTable));
     m_qos_handler_map.insert(qos_handler_pair(APP_WRED_PROFILE_TABLE_NAME, &QosOrch::handleWredProfileTable));
+
+    m_qos_handler_map.insert(qos_handler_pair(APP_TC_TO_PRIORITY_GROUP_MAP_NAME, &QosOrch::handleTcToPgTable));
+    m_qos_handler_map.insert(qos_handler_pair(APP_PFC_PRIORITY_TO_PRIORITY_GROUP_MAP_NAME, &QosOrch::handlePfcPrioToPgTable));
+    m_qos_handler_map.insert(qos_handler_pair(APP_PFC_PRIORITY_TO_QUEUE_MAP_NAME, &QosOrch::handlePfcToQueueTable));
 }
 
 task_process_status QosOrch::handleSchedulerTable(Consumer& consumer)
@@ -903,6 +1177,53 @@ bool QosOrch::applyMapToPort(Port &port, sai_attr_id_t attr_id, sai_object_id_t 
     }
     return true;
 }
+task_process_status QosOrch::ResolveMapAndApplyToPort(
+    Port                    &port,
+    sai_port_attr_t         port_attr, 
+    string                  field_name, 
+    KeyOpFieldsValuesTuple  &tuple, 
+    string                  op)
+{
+    SWSS_LOG_ENTER();
+    sai_object_id_t sai_object = SAI_NULL_OBJECT_ID;
+    bool result;
+    ref_resolve_status resolve_result = resolveFieldRefValue(m_qos_type_maps, field_name, tuple, sai_object);
+    if (ref_resolve_status::success == resolve_result)
+    {
+        if (op == SET_COMMAND)
+        {
+            result = applyMapToPort(port, port_attr, sai_object);
+        }
+        else if (op == DEL_COMMAND)
+        {
+            // NOTE: The map is un-bound from the port. But the map itself still exists.
+            result = applyMapToPort(port, port_attr, SAI_NULL_OBJECT_ID);
+        }
+        else
+        {
+            SWSS_LOG_ERROR("Unknown operation type %s\n", op.c_str());
+            return task_process_status::task_invalid_entry;
+        }
+        if (!result)
+        {
+            SWSS_LOG_ERROR("Failed setting field:%s to port:%s, line:%d\n", field_name.c_str(), port.m_alias.c_str(), __LINE__);
+            return task_process_status::task_failed;
+        }
+        SWSS_LOG_DEBUG("Applied field:%s to port:%s, line:%d\n", field_name.c_str(), port.m_alias.c_str(), __LINE__);
+        return task_process_status::task_success;
+    }
+    else if (resolve_result != ref_resolve_status::field_not_found)
+    {
+        if(ref_resolve_status::not_resolved == resolve_result)
+        {
+            SWSS_LOG_ERROR("Missing or invalid %s reference\n", field_name.c_str());
+            return task_process_status::task_need_retry;
+        }
+        SWSS_LOG_ERROR("Resolving %s reference failed\n", field_name.c_str());
+        return task_process_status::task_failed;
+    }
+    return task_process_status::task_success;
+}
 
 task_process_status QosOrch::handlePortQosMapTable(Consumer& consumer)
 {
@@ -912,10 +1233,30 @@ task_process_status QosOrch::handlePortQosMapTable(Consumer& consumer)
     Port port;
     string key = kfvKey(tuple);
     string op = kfvOp(tuple);
-    bool result = true;
-    sai_object_id_t sai_object;
-    sai_port_attr_t port_attr;
     vector<string> port_names;
+    sai_uint8_t pfc_enable = 0;
+    bool pfc_enable_present = false;
+
+    for (auto i = kfvFieldsValues(tuple).begin(); i != kfvFieldsValues(tuple).end(); i++)
+    {
+        if (fvField(*i) == pfc_enable_name)
+        {
+            pfc_enable_present = true;
+            vector<string> queue_indexes;
+            if(!parseNameArray(fvValue(*i), queue_indexes))
+            {
+                SWSS_LOG_ERROR("Failed to obtain port names");
+                return task_process_status::task_invalid_entry;
+            }
+            for(string q_ind : queue_indexes)
+            {
+                sai_uint8_t q_val = std::stoi(q_ind);
+                pfc_enable |= (1 << q_val);
+            }
+            break;
+        }
+    }
+    
     //"PORT_QOS_MAP_TABLE:ETHERNET4
     if (consumer.m_consumer->getTableName() != APP_PORT_QOS_MAP_TABLE_NAME)
     {
@@ -938,76 +1279,43 @@ task_process_status QosOrch::handlePortQosMapTable(Consumer& consumer)
             return task_process_status::task_invalid_entry;
         }
 
-        port_attr = SAI_PORT_ATTR_QOS_DSCP_TO_TC_MAP;
-        ref_resolve_status resolve_result = resolveFieldRefValue(m_qos_type_maps, dscp_to_tc_field_name, tuple, sai_object);
-        if (ref_resolve_status::success == resolve_result)
+        task_process_status task_status = ResolveMapAndApplyToPort(port, SAI_PORT_ATTR_QOS_DSCP_TO_TC_MAP, dscp_to_tc_field_name, tuple, op); 
+        if(task_process_status::task_failed == task_status)
         {
-            if (op == SET_COMMAND)
+            return task_status;
+        }
+        task_status = ResolveMapAndApplyToPort(port, SAI_PORT_ATTR_QOS_TC_TO_QUEUE_MAP, tc_to_queue_field_name, tuple, op); 
+        if(task_process_status::task_failed == task_status)
+        {
+            return task_status;
+        }
+        task_status = ResolveMapAndApplyToPort(port, SAI_PORT_ATTR_QOS_TC_TO_PRIORITY_GROUP_MAP, tc_to_pg_map_field_name, tuple, op); 
+        if(task_process_status::task_failed == task_status)
+        {
+            return task_status;
+        }
+        task_status = ResolveMapAndApplyToPort(port, SAI_PORT_ATTR_QOS_PFC_PRIORITY_TO_PRIORITY_GROUP_MAP, pfc_to_pg_map_name, tuple, op); 
+        if(task_process_status::task_failed == task_status)
+        {
+            return task_status;
+        }
+        task_status = ResolveMapAndApplyToPort(port, SAI_PORT_ATTR_QOS_PFC_PRIORITY_TO_QUEUE_MAP, pfc_to_queue_map_name, tuple, op); 
+        if(task_process_status::task_failed == task_status)
+        {
+            return task_status;
+        }
+        if(pfc_enable_present)
+        {
+            sai_attribute_t pfc_attr;
+            pfc_attr.id = SAI_PORT_ATTR_PRIORITY_FLOW_CONTROL;
+            pfc_attr.value.u8 = pfc_enable;
+            sai_status_t status = sai_port_api->set_port_attribute(port.m_port_id, &pfc_attr);
+            if (status != SAI_STATUS_SUCCESS)
             {
-                result = applyMapToPort(port, port_attr, sai_object);
-            }
-            else if (op == DEL_COMMAND)
-            {
-                // NOTE: The map is un-bound from the port. But the map itself still exists.
-                result = applyMapToPort(port, port_attr, SAI_NULL_OBJECT_ID);
-            }
-            else
-            {
-                SWSS_LOG_ERROR("Unknown operation type %s\n", op.c_str());
-                return task_process_status::task_invalid_entry;
-            }
-            if (!result)
-            {
-                SWSS_LOG_ERROR("Failed setting field:%s to port:%s, line:%d\n", dscp_to_tc_field_name.c_str(), port.m_alias.c_str(), __LINE__);
+                SWSS_LOG_ERROR("Applying pfc_enable bits:0x%x to Port with alias:%s failed\n", pfc_enable, port_name.c_str());
                 return task_process_status::task_failed;
             }
-            SWSS_LOG_DEBUG("Applied field:%s to port:%s, line:%d\n", dscp_to_tc_field_name.c_str(), port.m_alias.c_str(), __LINE__);
-        }
-        else if (resolve_result != ref_resolve_status::field_not_found) 
-        {
-            if(ref_resolve_status::not_resolved == resolve_result)
-            {
-                SWSS_LOG_ERROR("Missing or invalid dscp_to_tc reference\n");
-                return task_process_status::task_need_retry;
-            }
-            SWSS_LOG_ERROR("Resolving dscp_to_tc reference failed\n");
-            return task_process_status::task_failed;
-        }
-
-        port_attr = SAI_PORT_ATTR_QOS_TC_TO_QUEUE_MAP;
-        resolve_result = resolveFieldRefValue(m_qos_type_maps, tc_to_queue_field_name, tuple, sai_object);
-        if (ref_resolve_status::success == resolve_result)
-        {
-            if (op == SET_COMMAND)
-            {
-                result = applyMapToPort(port, port_attr, sai_object);
-            }
-            else if (op == DEL_COMMAND)
-            {
-                // NOTE: The map is un-bound from the port. But the map itself still exists.
-                result = applyMapToPort(port, port_attr, SAI_NULL_OBJECT_ID);
-            }
-            else
-            {
-                SWSS_LOG_ERROR("Unknown operation type %s\n", op.c_str());
-                return task_process_status::task_invalid_entry;
-            }
-            if (!result)
-            {
-                SWSS_LOG_ERROR("Failed setting field:%s to port:%s, line:%d\n", tc_to_queue_field_name.c_str(), port.m_alias.c_str(), __LINE__);
-                return task_process_status::task_failed;
-            }
-            SWSS_LOG_DEBUG("Applied field:%s to port:%s, line:%d\n", tc_to_queue_field_name.c_str(), port.m_alias.c_str(), __LINE__);
-        }
-        else if (resolve_result != ref_resolve_status::field_not_found)
-        {
-            if(ref_resolve_status::not_resolved == resolve_result)
-            {
-                SWSS_LOG_ERROR("Missing or invalid tc_to_queue reference\n");
-                return task_process_status::task_need_retry;
-            }
-            SWSS_LOG_ERROR("Resolving tc_to_queue reference failed\n");
-            return task_process_status::task_failed;
+            
         }
     }
     return task_process_status::task_success;

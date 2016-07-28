@@ -5,6 +5,10 @@
 #include "orch.h"
 #include "portsorch.h"
 
+const std::string tc_to_pg_map_field_name           = "tc_to_pg_map";
+const std::string pfc_to_pg_map_name                = "pfc_to_pg_map";
+const std::string pfc_to_queue_map_name             = "pfc_to_queue_map";
+const std::string pfc_enable_name                   = "pfc_enable";
 const std::string tc_to_queue_field_name            = "tc_to_queue_map";
 const std::string dscp_to_tc_field_name             = "dscp_to_tc_map";
 const std::string scheduler_field_name              = "scheduler";
@@ -81,6 +85,40 @@ protected:
     bool convertBool(string str, bool &val);
 };
 
+
+class TcToPgHandler : public QosMapHandler
+{
+public:
+    bool isValidTable(string &tableName);
+    bool convertFieldValuesToAttributes(KeyOpFieldsValuesTuple &tuple, std::vector<sai_attribute_t> &attributes);
+    void freeAttribResources(std::vector<sai_attribute_t> &attributes);
+    bool modifyQosMap(sai_object_id_t, std::vector<sai_attribute_t> &attributes);
+    sai_object_id_t addQosMap(std::vector<sai_attribute_t> &attributes);
+    bool removeQosMap(sai_object_id_t sai_object);
+};
+
+class PfcPrioToPgHandler : public QosMapHandler
+{
+public:
+    bool isValidTable(string &tableName);
+    bool convertFieldValuesToAttributes(KeyOpFieldsValuesTuple &tuple, std::vector<sai_attribute_t> &attributes);
+    void freeAttribResources(std::vector<sai_attribute_t> &attributes);
+    bool modifyQosMap(sai_object_id_t, std::vector<sai_attribute_t> &attributes);
+    sai_object_id_t addQosMap(std::vector<sai_attribute_t> &attributes);
+    bool removeQosMap(sai_object_id_t sai_object);
+};
+
+class PfcToQueueHandler : public QosMapHandler
+{
+public:
+    bool isValidTable(string &tableName);
+    bool convertFieldValuesToAttributes(KeyOpFieldsValuesTuple &tuple, std::vector<sai_attribute_t> &attributes);
+    void freeAttribResources(std::vector<sai_attribute_t> &attributes);
+    bool modifyQosMap(sai_object_id_t, std::vector<sai_attribute_t> &attributes);
+    sai_object_id_t addQosMap(std::vector<sai_attribute_t> &attributes);
+    bool removeQosMap(sai_object_id_t sai_object);
+};
+
 class QosOrch : public Orch
 {
 public:
@@ -105,6 +143,16 @@ private:
     task_process_status handlePortQosMapTable(Consumer& consumer);
     bool applyMapToPort(Port &port, sai_attr_id_t attr_id, sai_object_id_t sai_dscp_to_tc_map);
     task_process_status handleWredProfileTable(Consumer& consumer);
+    task_process_status ResolveMapAndApplyToPort(
+        Port                    &port,
+        sai_port_attr_t         port_attr, 
+        string                  field_name, 
+        KeyOpFieldsValuesTuple  &tuple, 
+        string                  op);
+
+    task_process_status handleTcToPgTable(Consumer& consumer);
+    task_process_status handlePfcPrioToPgTable(Consumer& consumer);
+    task_process_status handlePfcToQueueTable(Consumer& consumer);
 
 private:
     PortsOrch *m_portsOrch;

@@ -47,7 +47,10 @@ bool OrchDaemon::init()
         APP_DSCP_TO_TC_MAP_TABLE_NAME,
         APP_QUEUE_TABLE_NAME,
         APP_PORT_QOS_MAP_TABLE_NAME,
-        APP_WRED_PROFILE_TABLE_NAME
+        APP_WRED_PROFILE_TABLE_NAME,
+        APP_TC_TO_PRIORITY_GROUP_MAP_NAME,
+        APP_PFC_PRIORITY_TO_PRIORITY_GROUP_MAP_NAME,
+        APP_PFC_PRIORITY_TO_QUEUE_MAP_NAME
     };
     QosOrch *qos_orch = new QosOrch(m_applDb, qos_tables, ports_orch);
 
